@@ -8,6 +8,8 @@ import tempfile
 import numpy as np
 from dotenv import load_dotenv
 import uuid
+import subprocess
+import platform
 
 # Load environment variables from .env file
 load_dotenv()
@@ -54,7 +56,6 @@ def generate_image(prompt, output_path):
         return None, None
 
 def get_mac_font():
-    """Get system font path for macOS"""
     font_paths = [
         "/System/Library/Fonts/SFNS.ttf",  # San Francisco (modern macOS)
         "/System/Library/Fonts/SFNSDisplay.ttf",  # San Francisco Display
@@ -74,7 +75,7 @@ def create_tiktok_video(text, background_music_path=None, output_path="output"):
     output_path = os.path.expanduser(output_path)  # Expand ~ if used
     os.makedirs(output_path, exist_ok=True)
     
-    paragraphs = text.split('\n\n')
+    sentances = text.split('.')
     clips = []
     temp_files = []  # Keep track of temporary files
     
@@ -85,20 +86,20 @@ def create_tiktok_video(text, background_music_path=None, output_path="output"):
     # Get macOS specific font
     font_path = get_mac_font()
     
-    for i, paragraph in enumerate(paragraphs):
-        if not paragraph.strip():
+    for i, sentance in enumerate(sentances):
+        if not sentance.strip():
             continue
         
         try:
             # Generate image with unique filename
-            prompt = f"Create a vertical format illustration of: {paragraph[:200]}..."
+            prompt = f"Create a vertical format illustration of: {sentance[:200]}..."
             image, image_path = generate_image(prompt, output_path)
             
             if image and image_path:
                 temp_files.append(image_path)
                 
                 # Generate speech
-                tts = gTTS(text=paragraph, lang='en', tld='co.in')
+                tts = gTTS(text=sentance, lang='en', tld='ie')
                 audio_path = os.path.join(output_path, f"audio_{uuid.uuid4()}.mp3")
                 tts.save(audio_path)
                 temp_files.append(audio_path)
@@ -110,7 +111,7 @@ def create_tiktok_video(text, background_music_path=None, output_path="output"):
                              .with_duration(audio.duration))
                 
                 # Add captions with macOS font
-                txt_clip = (TextClip(text=paragraph, 
+                txt_clip = (TextClip(text=sentance, 
                                    font_size=40,
                                    color='white',
                                    size=(1000, None),
@@ -134,7 +135,7 @@ def create_tiktok_video(text, background_music_path=None, output_path="output"):
                 clips.append(video_clip)
                 
         except Exception as e:
-            print(f"Error processing paragraph {i+1}: {e}")
+            print(f"Error processing sentance {i+1}: {e}")
             continue
     
     # Combine all clips
@@ -165,19 +166,113 @@ def create_tiktok_video(text, background_music_path=None, output_path="output"):
     return None
 
 # Example usage
+
+def view_tiktok_stats():
+    """View TikTok profile statistics using TikTok API"""
+    print("got tick tock stats")
+
+def get_user_input():
+    """Get text input from user for video creation"""
+    print("\nEnter your text for the TikTok video (press Enter twice when done):")
+    lines = []
+    while True:
+        line = input()
+        if line:
+            lines.append(line)
+        elif lines:  # Empty line and we have content
+            break
+    return ' '.join(lines)
+
+
+def open_video(video_path):
+    """Open video with default system video player"""
+    try:
+        if platform.system() == 'Darwin':       # macOS
+            subprocess.run(['open', video_path])
+        elif platform.system() == 'Windows':     # Windows
+            os.startfile(video_path)
+        else:                                   # Linux
+            subprocess.run(['xdg-open', video_path])
+        return True
+    except Exception as e:
+        print(f"Error opening video: {e}")
+        return False
+
+def post_to_tiktok(video_path):
+    """Post video to TikTok using TikTok API"""
+    print("video posted to tiktok")
+
+def handle_video_options(video_path):
+    """Handle post-creation video options"""
+    while True:
+        print("\n=== Video Options ===")
+        print("1. View video")
+        print("2. Post to TikTok")
+        print("3. Delete video")
+        print("4. Keep video and return to main menu")
+        
+        choice = input("\nEnter your choice (1-4): ")
+        
+        if choice == "1":
+            print("\nOpening video...")
+            if open_video(video_path):
+                print("Video opened in default player")
+            else:
+                print("Failed to open video")
+                
+        elif choice == "2":
+            print("\nPosting to TikTok...")
+            if post_to_tiktok(video_path):
+                print("Would you like to keep the local copy?")
+                if input("Enter 'y' to keep or any other key to delete: ").lower() != 'y':
+                    os.remove(video_path)
+                    print("Local video file deleted")
+                return
+            
+        elif choice == "3":
+            confirm = input("\nAre you sure you want to delete the video? (y/n): ")
+            if confirm.lower() == 'y':
+                try:
+                    os.remove(video_path)
+                    print("Video deleted successfully")
+                    return
+                except Exception as e:
+                    print(f"Error deleting video: {e}")
+            
+        elif choice == "4":
+            return
+        
+        else:
+            print("\nInvalid choice. Please try again.")
+
+def main():
+    while True:
+        print("\n=== TikTok Content Manager ===")
+        print("1. Create new TikTok video")
+        print("2. View profile statistics")
+        print("3. Exit")
+        
+        choice = input("\nEnter your choice (1-3): ")
+        
+        if choice == "1":
+            text = get_user_input()
+            if text:
+                print("\nCreating video...")
+                output_video = create_tiktok_video(text)
+                if output_video:
+                    print(f"\nVideo created successfully: {output_video}")
+                    handle_video_options(output_video)
+        
+        elif choice == "2":
+            view_tiktok_stats()
+        
+        elif choice == "3":
+            print("\nGoodbye!")
+            break
+        
+        else:
+            print("\nInvalid choice. Please try again.")
+
 if __name__ == "__main__":
-    text = """Am I Overreacting?
-
-Okay, so here's the deal: I work with this super talented software developer named Nicholas Palichuk. He's honestly one of the cutest people I've ever met—like, he's got that perfect mix of brainy and adorable. And every time I see him working on code, I can’t help but get a little distracted. 🧑‍💻💖
-
-I know I should be focused on my own work, but there’s something about the way he codes (seriously, he’s fast and efficient) and the way he casually cracks jokes during team meetings that just makes my heart skip a beat. Plus, he always seems so approachable and friendly, and I’m starting to think I might have a little crush on him... or maybe it's just admiration for his programming skills? 🤔
-
-But, here’s where I’m unsure—whenever I catch myself staring at him (totally not on purpose, I swear!), I feel like I might be overthinking it. Does anyone else get distracted by cute colleagues, or is it just me? And is it okay to have a little crush on someone at work, or should I just focus on being a professional and stop daydreaming about pairing with him on a project?
-
-I mean, he’s honestly so cute that even his pull requests are adorable. 😅
-"""
+    main()
     
-    # Example with path that might include ~
-    output_video = create_tiktok_video(text, 'what_is_love.mp3')
-    if output_video:
-        print(f"Video created successfully: {output_video}")

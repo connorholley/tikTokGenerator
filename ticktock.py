@@ -1,5 +1,6 @@
 import os
-import requests
+import torch
+from diffusers import StableDiffusionPipeline
 from PIL import Image
 import io
 from moviepy import ImageClip, concatenate_videoclips, AudioFileClip, TextClip, CompositeVideoClip, ColorClip, vfx
@@ -10,9 +11,63 @@ import uuid
 import subprocess
 import platform
 import webbrowser
+import requests
 
 # Load environment variables from .env file
 load_dotenv()
+
+class LocalStableDiffusion:
+    def __init__(self):
+        self.pipe = None
+        self.initialize_model()
+    
+    def initialize_model(self):
+        """Initialize the Stable Diffusion model locally"""
+        model_id = "runwayml/stable-diffusion-v1-5"  # You can change this to other models
+        
+        # Initialize the pipeline
+        self.pipe = StableDiffusionPipeline.from_pretrained(
+            model_id,
+            torch_dtype=torch.float32  # Use float32 for CPU-based operation
+        )
+        
+        # Correctly disable the safety checker (returning two elements as expected by the pipeline)
+        self.pipe.safety_checker = lambda images, **kwargs: (images, [False] * len(images))
+
+        # Move the model to CPU (since MacBook Air doesn't have CUDA GPU)
+        self.pipe = self.pipe.to("cpu")
+        
+        # Optional: Enable attention slicing for lower memory usage
+        self.pipe.enable_attention_slicing()
+
+
+    def generate_image(self, prompt, output_path):
+        """Generate image using local Stable Diffusion and resize to TikTok dimensions"""
+        try:
+            # Generate the image
+            image = self.pipe(
+                prompt,
+                height=512,  # Initial size for faster generation
+                width=384,   # Initial size
+                num_inference_steps=20,  # Lower number of steps for faster output
+            ).images[0]
+            
+            # Resize the image to TikTok dimensions (1080x1920)
+            tiktok_size = (1080, 1920)
+            image_resized = image.resize(tiktok_size)
+            
+            # Generate unique filename
+            unique_filename = os.path.join(output_path, f"{uuid.uuid4()}.png")
+            
+            # Save the resized image
+            image_resized.save(unique_filename)
+            
+            return image_resized, unique_filename
+            
+        except Exception as e:
+            print(f"Error generating image: {e}")
+            return None, None
+
 
 def generate_speech_elevenlabs(text):
     """Generate speech using ElevenLabs API"""
@@ -21,7 +76,7 @@ def generate_speech_elevenlabs(text):
         print("ElevenLabs API Key is not set.")
         return None
     
-    url = "https://api.elevenlabs.io/v1/text-to-speech/Zlb1dXrM653N07WRdFW3" 
+    url = "https://api.elevenlabs.io/v1/text-to-speech/N2lVS1w4EtoT3dr4eOWO" 
     
     headers = {
         "Accept": "audio/mpeg",
@@ -51,44 +106,6 @@ def generate_speech_elevenlabs(text):
         print(f"Error generating speech: {e}")
         return None
 
-def generate_image(prompt, output_path):
-    """Generate image with a unique filename"""
-    api_key = os.getenv('STABILITY_KEY')
-    if not api_key:
-        print("API Key is not set.")
-        return None
-    
-    url = "https://api.stability.ai/v2beta/stable-image/generate/core"
-    
-    headers = {
-        "authorization": f"Bearer {api_key}",
-        "accept": "image/*",
-    }
-    
-    data = {
-        "prompt": prompt,
-        "output_format": "png",
-    }
-    
-    try:
-        response = requests.post(url, headers=headers, files={"none": ''}, data=data)
-        
-        if response.status_code == 200:
-            unique_filename = os.path.join(output_path, f"{uuid.uuid4()}.png")
-            
-            with open(unique_filename, 'wb') as file:
-                file.write(response.content)
-            
-            image = Image.open(unique_filename)
-            return image, unique_filename
-        else:
-            print(f"Error: {response.status_code}")
-            print(f"Response content: {response.text}")
-            return None, None
-    except Exception as e:
-        print(f"Error generating image: {e}")
-        return None, None
-
 def get_mac_font():
     font_paths = [
         "/System/Library/Fonts/SFNS.ttf",
@@ -104,6 +121,10 @@ def get_mac_font():
     return "/System/Library/Fonts/Helvetica.ttc"
 
 def create_tiktok_video(text, background_music_path=None, output_path="output"):
+    # Create an instance of the LocalStableDiffusion class
+    local_sd = LocalStableDiffusion()
+    
+    # Ensure output directory exists
     output_path = os.path.expanduser(output_path)
     os.makedirs(output_path, exist_ok=True)
     
@@ -111,23 +132,29 @@ def create_tiktok_video(text, background_music_path=None, output_path="output"):
     clips = []
     temp_files = []
     
+    # Setup background for text captions
     caption_bg = ColorClip((1080, 300), color=(0, 0, 0))
     caption_bg = caption_bg.with_opacity(0.7)
     
+    # Get font for captions
     font_path = get_mac_font()
     
+    # Process each sentence and generate corresponding content
     for i, sentence in enumerate(sentences):
         if not sentence.strip():
             continue
         
         try:
+            # Create prompt for image generation
             prompt = f"Create a vertical format illustration of: {sentence[:200]}..."
-            image, image_path = generate_image(prompt, output_path)
+            
+            # Call the generate_image method from LocalStableDiffusion instance
+            image, image_path = local_sd.generate_image(prompt, output_path)
             
             if image and image_path:
                 temp_files.append(image_path)
                 
-                # Generate speech using ElevenLabs
+                # Generate speech using ElevenLabs API
                 audio_content = generate_speech_elevenlabs(sentence)
                 if audio_content:
                     audio_path = os.path.join(output_path, f"audio_{uuid.uuid4()}.mp3")
@@ -137,8 +164,9 @@ def create_tiktok_video(text, background_music_path=None, output_path="output"):
                     
                     audio = AudioFileClip(audio_path)
                     image_clip = (ImageClip(image_path)
-                                .with_duration(audio.duration))
+                                  .with_duration(audio.duration))
                     
+                    # Create text caption for the sentence
                     txt_clip = (TextClip(text=sentence, 
                                        font_size=40,
                                        color='white',
@@ -148,16 +176,19 @@ def create_tiktok_video(text, background_music_path=None, output_path="output"):
                                .with_position(('center', 'bottom'))
                                .with_duration(audio.duration))
                     
+                    # Position background for captions
                     caption_bg_sized = (caption_bg
-                                      .with_duration(audio.duration)
-                                      .with_position(('center', 'bottom')))
+                                        .with_duration(audio.duration)
+                                        .with_position(('center', 'bottom')))
                     
+                    # Combine all clips into one video clip
                     video_clip = CompositeVideoClip([
                         image_clip,
                         caption_bg_sized,
                         txt_clip
                     ])
                     
+                    # Set audio for the video clip
                     video_clip = video_clip.with_audio(audio)
                     clips.append(video_clip)
                 
@@ -165,9 +196,11 @@ def create_tiktok_video(text, background_music_path=None, output_path="output"):
             print(f"Error processing sentence {i+1}: {e}")
             continue
     
+    # Combine all video clips into the final video
     if clips:
         final_video = concatenate_videoclips(clips)
         
+        # Save final video
         output_file = os.path.join(output_path, f"tiktok_video_{uuid.uuid4()}.mp4")
         final_video.write_videofile(
             output_file,
@@ -178,6 +211,7 @@ def create_tiktok_video(text, background_music_path=None, output_path="output"):
             threads=os.cpu_count()
         )
         
+        # Clean up temporary files
         for temp_file in temp_files:
             try:
                 os.remove(temp_file)
